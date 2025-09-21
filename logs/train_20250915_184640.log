@@ -1,0 +1,9 @@
+2025-09-15 18:46:45 | tcn | Epoch 1/5 | Train: 6.7606 | Val: 5.0428
+2025-09-15 18:46:45 | New best tcn saved (Val Loss 5.0428)
+2025-09-15 18:46:45 | tcn | Epoch 2/5 | Train: 6.6876 | Val: 4.8898
+2025-09-15 18:46:45 | New best tcn saved (Val Loss 4.8898)
+2025-09-15 18:46:46 | tcn | Epoch 3/5 | Train: 6.5596 | Val: 4.6293
+2025-09-15 18:46:46 | New best tcn saved (Val Loss 4.6293)
+2025-09-15 18:46:47 | tcn | Epoch 4/5 | Train: 5.9880 | Val: 4.4945
+2025-09-15 18:46:47 | New best tcn saved (Val Loss 4.4945)
+2025-09-15 18:46:48 | tcn | Epoch 5/5 | Train: 5.9352 | Val: 4.9708

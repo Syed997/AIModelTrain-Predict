@@ -1,0 +1,2 @@
+2025-09-14 11:28:23 | lstm | Epoch 1/5 | Train: 104.1066 | Val: 69.8924
+2025-09-14 11:28:23 | New best lstm saved (Val Loss 69.8924)

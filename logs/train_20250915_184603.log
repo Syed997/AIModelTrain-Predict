@@ -1,0 +1,7 @@
+2025-09-15 18:46:10 | lstm | Epoch 1/5 | Train: 47.3766 | Val: 47.7744
+2025-09-15 18:46:10 | New best lstm saved (Val Loss 47.7744)
+2025-09-15 18:46:12 | lstm | Epoch 2/5 | Train: 47.3860 | Val: 47.7825
+2025-09-15 18:46:15 | lstm | Epoch 3/5 | Train: 47.3476 | Val: 47.8241
+2025-09-15 18:46:18 | lstm | Epoch 4/5 | Train: 47.3655 | Val: 47.7542
+2025-09-15 18:46:18 | New best lstm saved (Val Loss 47.7542)
+2025-09-15 18:46:20 | lstm | Epoch 5/5 | Train: 47.4102 | Val: 47.7555
