@@ -1,3 +1,4 @@
+# TODO: need to convert this into .env
 INPUT_WINDOW = 25
 FORECAST_HORIZON = 10
 N_FEATURES = 5

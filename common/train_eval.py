@@ -48,4 +48,6 @@ def train_model(model, dir_path, model_name, train_loader, val_loader=None,
             break
 
         save_checkpoint(model, dir_path, model_name, epoch)
-    
+
+
+# TODO: need to implement learning graph

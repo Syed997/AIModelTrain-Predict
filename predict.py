@@ -14,6 +14,9 @@ from config.config import (
     INPUT_WINDOW, FORECAST_HORIZON, N_FEATURES, TIMESERIES_MODE,
     BATCH_SIZE, TEST_CSV, LSTM_MODEL_FILENAME, TCN_MODEL_FILENAME
     )
+
+# TODO: need to implement prediction graph
+
 # import yaml
 
 # config_path = os.path.join("config", "config.yaml")
