@@ -50,10 +50,6 @@ def train_model(model, dir_path, model_name, train_loader, val_loader=None,
 
         save_checkpoint(model, dir_path, model_name, epoch)
 
-import os
-import glob
-import torch
-import torch.nn as nn
 
 def train_autoencoder(
     model,
@@ -126,78 +122,5 @@ def train_autoencoder(
         save_checkpoint(model, save_dir, model_name, epoch)
 
 
-
-# def train_autoencoder(
-#     model,
-#     train_loader,
-#     val_loader=None,
-#     epochs=20,
-#     lr=0.001,
-#     device="cpu",
-#     save_dir="checkpoints",
-#     model_name="autoencoder",
-#     stop_threshold=0.01
-# ):
-
-#     os.makedirs(save_dir, exist_ok=True)
-
-#     model = model.to(device)
-#     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
-#     loss_fn = nn.MSELoss()
-
-#     best_val_loss = float("inf")
-
-#     for epoch in range(epochs):
-#         model.train()
-#         train_loss = 0
-
-#         # --- TRAIN LOOP ---
-#         for xb, _ in train_loader:
-#             xb = xb.to(device)
-
-#             optimizer.zero_grad()
-#             reconstructed = model(xb)
-#             loss = loss_fn(reconstructed, xb)
-#             loss.backward()
-#             optimizer.step()
-
-#             train_loss += loss.item()
-
-#         train_loss /= len(train_loader)
-
-#         # --- VALIDATION LOOP ---
-#         val_loss = None
-#         if val_loader is not None:
-#             model.eval()
-#             val_loss = 0
-#             with torch.no_grad():
-#                 for xb, _ in val_loader:
-#                     xb = xb.to(device)
-#                     reconstructed = model(xb)
-#                     val_loss += loss_fn(reconstructed, xb).item()
-#             val_loss /= len(val_loader)
-
-#         # --- LOGGING ---
-#         if val_loss is not None:
-#             print(f"{model_name} | Epoch {epoch+1}/{epochs} | Train: {train_loss:.4f} | Val: {val_loss:.4f}")
-
-#             # Save best model
-#             if val_loss < best_val_loss:
-#                 best_val_loss = val_loss
-#                 torch.save(model.state_dict(), os.path.join(save_dir, f"{model_name}_best.pth"))
-#                 print(f"New best model saved (Val Loss {val_loss:.4f})")
-
-#         else:
-#             print(f"{model_name} | Epoch {epoch+1}/{epochs} | Train: {train_loss:.4f}")
-
-#         # --- EARLY STOP ---
-#         if (val_loss and val_loss <= stop_threshold) or (val_loss is None and train_loss <= stop_threshold):
-#             print(f"{model_name} stopped early at epoch {epoch+1}")
-#             break
-
-#         # Save epoch checkpoint (same behavior as `save_checkpoint`)
-#         torch.save(model.state_dict(), os.path.join(save_dir, f"{model_name}_epoch_{epoch+1}.pth"))
-
-#     print(f"Training complete. Best loss = {best_val_loss:.4f}")
 
 # TODO: need to implement learning graph
