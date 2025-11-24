@@ -11,7 +11,8 @@ TRAIN_SPLIT = 0.8
 
 TCN_MODEL_FILENAME = "tcn_best.pth"
 LSTM_MODEL_FILENAME = "lstm_best.pth"
+LSTM_AUTOENCODER_MODEL_FILENAME = "autoencoder_best.pth"
 TRAIN_CSV = "train.csv"
 TEST_CSV = "temp.csv"
 EVAL_CSV = "eval.csv"
-TIMESERIES_MODE = "test"  # "train" or "test"
+TIMESERIES_MODE = "train"  # "train" or "test"
