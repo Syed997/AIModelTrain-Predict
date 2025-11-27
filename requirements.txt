@@ -19,3 +19,4 @@ six==1.17.0
 tzdata==2025.2
 torch
 tqdm
+scikit-learn
