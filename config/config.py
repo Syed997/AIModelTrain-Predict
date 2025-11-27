@@ -1,7 +1,7 @@
 # TODO: need to convert this into .env
 INPUT_WINDOW = 25
 FORECAST_HORIZON = 10
-N_FEATURES = 5
+N_FEATURES = None
 EPOCHS = 5
 THRESHOLDS = [5, 5, 5, 5, 5]
 STOP_THRESHOLD = 1e-5
@@ -12,7 +12,7 @@ TRAIN_SPLIT = 0.8
 TCN_MODEL_FILENAME = "tcn_best.pth"
 LSTM_MODEL_FILENAME = "lstm_best.pth"
 LSTM_AUTOENCODER_MODEL_FILENAME = "autoencoder_best.pth"
-TRAIN_CSV = "train.csv"
+TRAIN_CSV = "kafka.csv"
 TEST_CSV = "temp.csv"
-EVAL_CSV = "eval.csv"
+EVAL_CSV = "kafka.csv"
 TIMESERIES_MODE = "train"  # "train" or "test"
