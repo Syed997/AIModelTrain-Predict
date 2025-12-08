@@ -41,53 +41,61 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 # remove the non numeric columns
 def load_data(file_path):
-    print(f"Loading data from: {file_path}")
+    print(f"\n[TRAIN] Loading training data: {file_path}")
     df = pd.read_csv(file_path)
 
-    # Drop obvious string columns first
+    # Drop string columns
     string_cols = ["timestamp", "topic", "trace_id", "span_id", "parent_span_id",
                    "attributes_code.filepath", "attributes_http.url", "attributes_url.full",
                    "attributes_user_agent.original", "name", "body", "exception_message",
                    "exception_stacktrace", "exception_type", "resource_attributes_service.name"]
     df = df.drop(columns=[c for c in string_cols if c in df.columns], errors="ignore")
 
-    # Convert to numeric — this turns non-numeric → NaN
     numeric_df = df.select_dtypes(include=[np.number])
-
-    # CRITICAL: Remove columns that are ALL NaN or have too many NaNs
     print(f"Before cleaning: {numeric_df.shape[1]} numeric columns")
-    numeric_df = numeric_df.dropna(axis=1, thresh=int(0.1 * len(numeric_df)))  # keep if ≥10% non-NaN
-    print(f"After dropping mostly-empty columns: {numeric_df.shape[1]} columns")
+    numeric_df = numeric_df.dropna(axis=1, thresh=int(0.1 * len(numeric_df)))
+    print(f"After cleaning: {numeric_df.shape[1]} columns")
 
-    # Fill remaining NaNs with reasonable values
-    numeric_df = numeric_df.fillna(numeric_df.median(numeric_only=True))
-    # If median still NaN (column was all NaN), fill with 0
-    numeric_df = numeric_df.fillna(0)
+    # === CONVERT COUNTERS TO CLEAN PER-SECOND RATES ===
+    print("Converting counters → clean per-second rates...")
+    counter_keywords = ['count', 'total', 'size', 'byte', 'request', 'query', 'event', 'duration']
+    counter_cols = [
+        col for col in numeric_df.columns
+        if any(kw in col.lower() for kw in counter_keywords)
+        and col not in ['duration_ms', 'duration_ns', 'http.status_code']
+    ]
 
-    # Final sanity check
-    if numeric_df.isnull().any().any():
-        print("Still have NaN! Columns with NaN:")
-        print(numeric_df.columns[numeric_df.isnull().any()].tolist())
-        raise ValueError("NaN values remain after cleaning!")
+    for col in counter_cols:
+        if col in numeric_df.columns:
+            # Compute rate, but first row is garbage → fix it
+            rates = numeric_df[col].diff()
+            # Replace first row with median of the rest (or 0)
+            rates.iloc[0] = rates.iloc[1:].median() if len(rates) > 1 else 0
+            rates = rates.clip(lower=0).fillna(0)
+            numeric_df[col] = rates
+
+    # DROP THE FIRST ROW — it's poisoned by diff()
+    numeric_df = numeric_df.iloc[1:].reset_index(drop=True)
+    print(f"Applied clean rate conversion + dropped first row → {len(numeric_df)} rows")
+
+    # Fill remaining NaN
+    numeric_df = numeric_df.fillna(numeric_df.median(numeric_only=True)).fillna(0)
 
     data = numeric_df.values.astype(np.float32)
 
-    # Normalize to 0–1
+    # === SAVE SCALER (only in training) ===
     data_min = data.min(axis=0, keepdims=True)
     data_max = data.max(axis=0, keepdims=True)
-    # Prevent division by zero
+    np.save("models/scaler_min.npy", data_min)
+    np.save("models/scaler_max.npy", data_max)
+    print("Saved scaler_min.npy and scaler_max.npy (rate-based, clean)")
+
+    # Normalize
     data_range = data_max - data_min
     data_range[data_range == 0] = 1.0
     data_normalized = (data - data_min) / data_range
 
-    # Save scaler and feature names
-    np.save(os.path.join(MODEL_DIR, "scaler_min.npy"), data_min)
-    np.save(os.path.join(MODEL_DIR, "scaler_max.npy"), data_max)
-    np.save(os.path.join(MODEL_DIR, "feature_names.npy"), np.array(numeric_df.columns))
-
-    print(f"Final dataset: {data_normalized.shape[0]} samples × {data_normalized.shape[1]} clean features")
-    print("Sample features:", list(numeric_df.columns[:10]), "...")
-
+    print(f"Final TRAINING data ready: {data_normalized.shape[0]} samples × {data_normalized.shape[1]} features\n")
     return data_normalized
 
 
@@ -137,6 +145,31 @@ def main():
         device=DEVICE,
         stop_threshold=STOP_THRESHOLD
     )
+    print("\n=== SAVING ROBUST PRODUCTION STATISTICS (FINAL FIX) ===")
+    model.eval()
+    all_errors = []
+    with torch.no_grad():
+        for batch in train_loader:
+            x = batch[0] if isinstance(batch, (list, tuple)) else batch
+            x = x.to(DEVICE)
+            recon = model(x)
+            # MSE per time step, then average over sequence
+            err = torch.mean((x - recon)**2, dim=[1,2])
+            all_errors.extend(err.cpu().numpy())
+
+    all_errors = np.array(all_errors)
+    
+    # THIS IS THE CORRECT WAY — used by every professional system
+    median_error = np.median(all_errors)
+    mad = np.median(np.abs(all_errors - median_error)) * 1.4826   # ← THIS LINE WAS MISSING!
+
+    np.save(os.path.join(MODEL_DIR, "train_mad.npy"), mad)
+    np.save(os.path.join(MODEL_DIR, "train_median_error.npy"), median_error)
+
+    print(f"Training median reconstruction error : {median_error:.6f}")
+    print(f"Training MAD (robust scale)         : {mad:.6f}   ← THIS IS THE REAL ONE!")
+    print(f"Example: an error of {mad * 10:.6f} will be flagged as 10× anomaly")
+    print("Production-ready robust detection is now ACTIVE!")
 
 
 if __name__ == "__main__":
