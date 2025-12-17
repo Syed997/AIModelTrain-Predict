@@ -16,3 +16,11 @@ TRAIN_CSV = "kafka_train.csv"
 TEST_CSV = "temp.csv"
 EVAL_CSV = "kafka.csv"
 TIMESERIES_MODE = "train"  # "train" or "test"
+
+DB_CONFIG = {
+    "host": "clickhouse",
+    "port": 9000,
+    "database": "kafka_logs",
+    "user": "default",
+    "password": ""
+}

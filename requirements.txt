@@ -20,3 +20,4 @@ tzdata==2025.2
 torch
 tqdm
 scikit-learn
+clickhouse_driver

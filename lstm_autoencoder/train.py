@@ -45,14 +45,18 @@ def load_data(file_path):
     df = pd.read_csv(file_path)
 
     # Drop string columns
-    string_cols = ["timestamp", "topic", "trace_id", "span_id", "parent_span_id",
-                   "attributes_code.filepath", "attributes_http.url", "attributes_url.full",
-                   "attributes_user_agent.original", "name", "body", "exception_message",
-                   "exception_stacktrace", "exception_type", "resource_attributes_service.name"]
+    string_cols = [
+        "timestamp", "topic", "trace_id", "span_id", "parent_span_id",
+        "attributes_code.filepath", "attributes_http.url", "attributes_url.full",
+        "attributes_user_agent.original", "name", "body", "exception_message",
+        "exception_stacktrace", "exception_type",
+        "resource_attributes_service.name"
+    ]
     df = df.drop(columns=[c for c in string_cols if c in df.columns], errors="ignore")
 
     numeric_df = df.select_dtypes(include=[np.number])
     print(f"Before cleaning: {numeric_df.shape[1]} numeric columns")
+
     numeric_df = numeric_df.dropna(axis=1, thresh=int(0.1 * len(numeric_df)))
     print(f"After cleaning: {numeric_df.shape[1]} columns")
 
@@ -66,36 +70,46 @@ def load_data(file_path):
     ]
 
     for col in counter_cols:
-        if col in numeric_df.columns:
-            # Compute rate, but first row is garbage → fix it
-            rates = numeric_df[col].diff()
-            # Replace first row with median of the rest (or 0)
-            rates.iloc[0] = rates.iloc[1:].median() if len(rates) > 1 else 0
-            rates = rates.clip(lower=0).fillna(0)
-            numeric_df[col] = rates
+        rates = numeric_df[col].diff()
+        rates.iloc[0] = rates.iloc[1:].median() if len(rates) > 1 else 0
+        rates = rates.clip(lower=0).fillna(0)
+        numeric_df[col] = rates
 
-    # DROP THE FIRST ROW — it's poisoned by diff()
+    # DROP FIRST ROW (diff poison)
     numeric_df = numeric_df.iloc[1:].reset_index(drop=True)
     print(f"Applied clean rate conversion + dropped first row → {len(numeric_df)} rows")
 
     # Fill remaining NaN
     numeric_df = numeric_df.fillna(numeric_df.median(numeric_only=True)).fillna(0)
 
+    # =====================================================
+    # 🔥 CRITICAL FIX: SAVE FEATURE ORDER (ONCE, DURING TRAIN)
+    # =====================================================
+    feature_names = numeric_df.columns.to_numpy()
+    np.save(os.path.join(MODEL_DIR, "feature_names.npy"), feature_names)
+    print(f"Saved feature_names.npy ({len(feature_names)} features)")
+
+    # Convert to numpy
     data = numeric_df.values.astype(np.float32)
 
-    # === SAVE SCALER (only in training) ===
+    # === SAVE SCALER ===
     data_min = data.min(axis=0, keepdims=True)
     data_max = data.max(axis=0, keepdims=True)
-    np.save("models/scaler_min.npy", data_min)
-    np.save("models/scaler_max.npy", data_max)
-    print("Saved scaler_min.npy and scaler_max.npy (rate-based, clean)")
+    np.save(os.path.join(MODEL_DIR, "scaler_min.npy"), data_min)
+    np.save(os.path.join(MODEL_DIR, "scaler_max.npy"), data_max)
+    print("Saved scaler_min.npy and scaler_max.npy")
 
     # Normalize
     data_range = data_max - data_min
     data_range[data_range == 0] = 1.0
     data_normalized = (data - data_min) / data_range
 
-    print(f"Final TRAINING data ready: {data_normalized.shape[0]} samples × {data_normalized.shape[1]} features\n")
+    print(
+        f"Final TRAINING data ready: "
+        f"{data_normalized.shape[0]} samples × "
+        f"{data_normalized.shape[1]} features\n"
+    )
+
     return data_normalized
 
 

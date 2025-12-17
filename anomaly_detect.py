@@ -1,4 +1,5 @@
-# anomaly_detect.py — FINAL, BULLETPROOF, PRODUCTION-READY (FIXED!)
+# anomaly_detect.py — PRODUCTION-GRADE, CALIBRATED, SAFE
+
 import torch
 import numpy as np
 import pandas as pd
@@ -6,134 +7,174 @@ from torch.utils.data import DataLoader, Dataset
 from lstm_autoencoder.model.lstm_autoencoder import LSTMAutoencoder
 import os
 
+from pathlib import Path
+from datetime import datetime
+
+# ==================== ANOMALY STORAGE ====================
+ANOMALY_DIR = Path("anomalies")
+(ANOMALY_DIR / "anomaly").mkdir(parents=True, exist_ok=True)
+(ANOMALY_DIR / "critical").mkdir(parents=True, exist_ok=True)
+
+MAX_SAVE_FILES = 100   # safety guard
+
+# ==================== CONFIG ====================
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 MODEL_PATH = "models/autoencoder_best.pth"
 SEQ_LEN = 25
-BATCH_SIZE = 32
+BATCH_SIZE = 64
+DATA_PATH = "data/kafka_load.csv"
 
-# ==================== 1. MODEL LOADING ====================
-print(f"Loading model from {MODEL_PATH}...")
+ANOMALY_PERCENTILE = 99.5
+CRITICAL_PERCENTILE = 99.9
+MAX_ANOMALY_RATE = 0.30
+
+# ==================== MODEL ====================
+print(f"[INFO] Loading model → {MODEL_PATH}")
 model = LSTMAutoencoder(hidden_size=64, latent_size=16).to(DEVICE)
 
-# Build lazy layers
-dummy = torch.zeros(1, SEQ_LEN, 61, device=DEVICE)
 with torch.no_grad():
+    dummy = torch.zeros(1, SEQ_LEN, 61, device=DEVICE)
     _ = model(dummy)
 
 model.load_state_dict(torch.load(MODEL_PATH, map_location=DEVICE))
 model.eval()
-print("Model loaded and ready!\n")
+print("[INFO] Model ready\n")
 
-# ==================== 2. DATA LOADING ====================
+# ==================== DATA LOADING ====================
 def load_data(file_path):
-    print(f"\n[DETECT] Loading data: {file_path}")
+    print(f"[INFO] Loading data → {file_path}")
     df = pd.read_csv(file_path)
 
-    string_cols = ["timestamp", "topic", "trace_id", "span_id", "parent_span_id",
-                   "attributes_code.filepath", "attributes_http.url", "attributes_url.full",
-                   "attributes_user_agent.original", "name", "body", "exception_message",
-                   "exception_stacktrace", "exception_type", "resource_attributes_service.name"]
-    df = df.drop(columns=[c for c in string_cols if c in df.columns], errors="ignore")
-
-    numeric_df = df.select_dtypes(include=[np.number])
-    print(f"Before cleaning: {numeric_df.shape[1]} numeric columns")
-    numeric_df = numeric_df.dropna(axis=1, thresh=int(0.1 * len(numeric_df)))
-    print(f"After cleaning: {numeric_df.shape[1]} columns")
-
-    # === SAME CLEAN RATE CONVERSION AS TRAINING ===
-    print("Converting counters → clean per-second rates (matching training)...")
-    counter_keywords = ['count', 'total', 'size', 'byte', 'request', 'query', 'event', 'duration']
-    counter_cols = [
-        col for col in numeric_df.columns
-        if any(kw in col.lower() for kw in counter_keywords)
-        and col not in ['duration_ms', 'duration_ns', 'http.status_code']
+    drop_cols = [
+        "timestamp", "topic", "trace_id", "span_id", "parent_span_id",
+        "attributes_code.filepath", "attributes_http.url",
+        "attributes_url.full", "attributes_user_agent.original",
+        "name", "body", "exception_message",
+        "exception_stacktrace", "exception_type",
+        "resource_attributes_service.name"
     ]
+    df.drop(columns=[c for c in drop_cols if c in df.columns], inplace=True)
 
-    for col in counter_cols:
-        if col in numeric_df.columns:
-            rates = numeric_df[col].diff()
-            rates.iloc[0] = rates.iloc[1:].median() if len(rates) > 1 else 0
-            rates = rates.clip(lower=0).fillna(0)
-            numeric_df[col] = rates
+    numeric_df = df.select_dtypes(include=[np.number]).copy()
 
-    # DROP FIRST ROW — same as training
-    numeric_df = numeric_df.iloc[1:].reset_index(drop=True)
-    print(f"Applied clean rate conversion + dropped first row → {len(numeric_df)} rows")
+    feature_names = np.load("models/feature_names.npy", allow_pickle=True)
 
-    numeric_df = numeric_df.fillna(numeric_df.median(numeric_only=True)).fillna(0)
+    for col in feature_names:
+        if col not in numeric_df.columns:
+            numeric_df[col] = 0.0
+
+    numeric_df = numeric_df[feature_names]
+
+    for col in numeric_df.columns:
+        if any(k in col.lower() for k in ["count", "total", "size", "byte", "request", "event"]):
+            numeric_df[col] = numeric_df[col].diff().fillna(0).clip(lower=0)
+
+    numeric_df = numeric_df.iloc[1:].fillna(0).reset_index(drop=True)
+
+    if len(numeric_df) < SEQ_LEN:
+        raise ValueError("Not enough data for inference")
 
     data = numeric_df.values.astype(np.float32)
 
-    # === LOAD SAVED SCALER ===
     scaler_min = np.load("models/scaler_min.npy")
     scaler_max = np.load("models/scaler_max.npy")
-    data_range = scaler_max - scaler_min
-    data_range[data_range == 0] = 1.0
-    data_normalized = (data - scaler_min) / data_range
 
-    print(f"Final DETECTION data ready: {data_normalized.shape[0]} samples × {data_normalized.shape[1]} features\n")
-    return data_normalized, None, None
+    scale = scaler_max - scaler_min
+    scale[scale == 0] = 1.0
 
-# ==================== 3. DATASET ====================
+    data_norm = (data - scaler_min) / scale
+    data_norm = np.clip(data_norm, 0, 1)
+
+    print(f"[INFO] Prepared {len(data_norm)} samples × {data_norm.shape[1]} features")
+    return data_norm
+
+# ==================== DATASET ====================
 class AutoencoderDataset(Dataset):
     def __init__(self, data, seq_len):
         self.data = data
         self.seq_len = seq_len
+
     def __len__(self):
         return len(self.data) - self.seq_len + 1
+
     def __getitem__(self, idx):
         seq = self.data[idx: idx + self.seq_len]
-        seq = torch.tensor(seq, dtype=torch.float32)
-        return seq, seq
+        return torch.tensor(seq), torch.tensor(seq)
 
-# ==================== 4. INFERENCE & ROBUST DETECTION ====================
-data_norm, true_labels, anomaly_types = load_data("data/kafka_test.csv")
-dataset = AutoencoderDataset(data_norm, seq_len=SEQ_LEN)
+# ==================== INFERENCE ====================
+data_norm = load_data(DATA_PATH)
+dataset = AutoencoderDataset(data_norm, SEQ_LEN)
 loader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=False)
 
-print("\nRunning inference...")
+print("\n[INFO] Running inference...")
+
 errors = []
+windows = []   # <<< NEW (store each window)
+
 with torch.no_grad():
     for batch_x, _ in loader:
         batch_x = batch_x.to(DEVICE)
         recon = model(batch_x)
-        error = torch.mean((batch_x - recon) ** 2, dim=[1,2]).cpu().numpy()
-        errors.extend(error)
+        batch_err = torch.mean((batch_x - recon) ** 2, dim=[1, 2]).cpu().numpy()
+
+        for i in range(len(batch_err)):
+            errors.append(batch_err[i])
+            windows.append(batch_x[i].cpu().numpy())
 
 errors = np.array(errors)
 
-# === ROBUST RELATIVE SCORING (THIS IS THE REAL MAGIC) ===
-mad = np.load("models/train_mad.npy")
-print(f"Normal error scale from training (MAD): {mad:.8f}")
+# ==================== CALIBRATED THRESHOLDS ====================
+p_main = np.percentile(errors, ANOMALY_PERCENTILE)
+p_critical = np.percentile(errors, CRITICAL_PERCENTILE)
 
-anomaly_scores = errors / mad                # ← how many times worse than normal?
-RELATIVE_THRESHOLD = 100.0                     # ← 10× worse = real incident
+anomalies = errors > p_main
+critical = errors > p_critical
+anomaly_rate = anomalies.mean()
 
-detected = anomaly_scores > RELATIVE_THRESHOLD
+# ==================== SAVE ANOMALY WINDOWS ====================
+timestamp = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+saved = 0
 
-# ==================== 5. FINAL RESULTS ====================
-print("\n" + "="*80)
-print("           FINAL ANOMALY DETECTION RESULTS (PRODUCTION MODE)")
-print("="*80)
-print(f"Total windows processed     : {len(errors)}")
-print(f"Detected anomalies          : {detected.sum()} ({100*detected.sum()/len(errors):.3f}%)")
-print(f"Relative threshold          : {RELATIVE_THRESHOLD}× worse than normal")
-print(f"Max anomaly score           : {anomaly_scores.max():.1f}× → {'REAL INCIDENT!' if anomaly_scores.max() > 20 else 'Normal'}")
+for idx, (err, window) in enumerate(zip(errors, windows)):
+    if err <= p_main:
+        continue
 
-if detected.sum() > 0:
-    print(f"\nALERT: {detected.sum()} windows are {RELATIVE_THRESHOLD}+× worse than training!")
+    level = "critical" if err > p_critical else "anomaly"
+    fname = f"window_{idx:06d}_err_{err:.6f}_{timestamp}.txt"
+    fpath = ANOMALY_DIR / level / fname
 
-print("\nTop 10 most anomalous windows:")
-top_idx = np.argsort(anomaly_scores)[-10:][::-1]
-for i, idx in enumerate(top_idx):
-    score = anomaly_scores[idx]
-    status = "REAL ANOMALY!" if score > RELATIVE_THRESHOLD else "suspicious"
-    print(f"{i+1:2}. Window {idx:4} → {score:6.1f}× worse → {status}")
+    with open(fpath, "w") as f:
+        f.write(f"Window index     : {idx}\n")
+        f.write(f"Reconstruction MSE: {err:.8f}\n")
+        f.write(f"Main threshold   : {p_main:.8f}\n")
+        f.write(f"Critical threshold: {p_critical:.8f}\n")
+        f.write(f"Severity         : {level}\n")
+        f.write(f"Sequence length  : {SEQ_LEN}\n")
+        f.write(f"Num features     : {window.shape[1]}\n\n")
+        f.write("=== Window Data (normalized) ===\n")
+        np.savetxt(f, window, fmt="%.6f")
 
-print("\n" + "="*80)
-print("Your LSTM Autoencoder is now PERFECT.")
-print("It ignores distribution shifts.")
-print("It only alerts on REAL incidents.")
-print("You have built something truly world-class.")
-print("Deploy it. The system is now safe.")
-print("="*80)
+    saved += 1
+    if saved >= MAX_SAVE_FILES:
+        break
+
+# ==================== REPORT ====================
+print("\n" + "=" * 80)
+print("PRODUCTION ANOMALY SUMMARY")
+print("=" * 80)
+print(f"Total windows        : {len(errors)}")
+print(f"Anomaly threshold    : {ANOMALY_PERCENTILE}th percentile")
+print(f"Critical threshold   : {CRITICAL_PERCENTILE}th percentile")
+print(f"Detected anomalies   : {anomalies.sum()} ({anomaly_rate * 100:.2f}%)")
+print(f"Critical anomalies   : {critical.sum()}")
+
+if anomaly_rate > MAX_ANOMALY_RATE:
+    print("\n[WARNING] DISTRIBUTION DRIFT — alerts suppressed")
+elif critical.any():
+    print("\n[ALERT] CRITICAL INCIDENT DETECTED")
+elif anomalies.any():
+    print("\n[ALERT] Anomalous behavior detected")
+else:
+    print("\n[OK] System operating normally")
+
+print("=" * 80)
