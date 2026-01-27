@@ -17,3 +17,7 @@ scipy==1.15.3
 seaborn==0.13.2
 six==1.17.0
 tzdata==2025.2
+torch
+tqdm
+scikit-learn
+clickhouse_driver

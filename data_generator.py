@@ -592,5 +592,5 @@ if __name__ == "__main__":
     "network": 85,
     "temperature": 85
     }   
-    # plot_data(file_path="./data/train.csv", thresholds=thresholds)
-    plot_data(file_path="ultra_smooth_server_telemetry.csv", thresholds=thresholds)
+    plot_data(file_path="./data/train.csv", thresholds=thresholds)
+    # plot_data(file_path="ultra_smooth_server_telemetry.csv", thresholds=thresholds)
