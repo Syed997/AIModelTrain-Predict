@@ -95,6 +95,3 @@ aiPoc/
 - Matplotlib
 
 See `requirements.txt` for complete list.
-
-## License
-[MIT License](LICENSE)
